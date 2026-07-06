@@ -12,4 +12,6 @@ dependencies = [
 	"pandas",
 	"openpyxl",
 	"torch",
+	"scikit-learn",
+	"joblib",
 ]
