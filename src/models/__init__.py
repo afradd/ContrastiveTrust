@@ -22,15 +22,22 @@ FeatureFusion
     Residual gated fusion combining temporal and physics embeddings.
 FusionConfig
     Dataclass holding all hyper-parameters for :class:`FeatureFusion`.
+DualStreamEncoder
+    Dual-stream encoder orchestrating temporal, physics, and fusion.
+EncoderConfig
+    Dataclass composing sub-module configs for :class:`DualStreamEncoder`.
 """
 
 from src.models.blocks import ConvNormActivation, ResidualConvBlock
+from src.models.encoder import DualStreamEncoder, EncoderConfig
 from src.models.fusion import FeatureFusion, FusionConfig
 from src.models.physics_encoder import PhysicsEncoder, PhysicsEncoderConfig
 from src.models.temporal_encoder import TemporalEncoder, TemporalEncoderConfig
 
 __all__: list[str] = [
     "ConvNormActivation",
+    "DualStreamEncoder",
+    "EncoderConfig",
     "FeatureFusion",
     "FusionConfig",
     "PhysicsEncoder",
