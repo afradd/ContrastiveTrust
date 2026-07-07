@@ -18,14 +18,21 @@ PhysicsEncoder
     MLP-based physics encoder producing L2-normalised embeddings.
 PhysicsEncoderConfig
     Dataclass holding all hyper-parameters for :class:`PhysicsEncoder`.
+FeatureFusion
+    Residual gated fusion combining temporal and physics embeddings.
+FusionConfig
+    Dataclass holding all hyper-parameters for :class:`FeatureFusion`.
 """
 
 from src.models.blocks import ConvNormActivation, ResidualConvBlock
+from src.models.fusion import FeatureFusion, FusionConfig
 from src.models.physics_encoder import PhysicsEncoder, PhysicsEncoderConfig
 from src.models.temporal_encoder import TemporalEncoder, TemporalEncoderConfig
 
 __all__: list[str] = [
     "ConvNormActivation",
+    "FeatureFusion",
+    "FusionConfig",
     "PhysicsEncoder",
     "PhysicsEncoderConfig",
     "ResidualConvBlock",
