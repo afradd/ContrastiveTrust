@@ -1,7 +1,7 @@
 """Reusable sliding-window utilities for industrial control system time-series.
 
 The :class:`SlidingWindowGenerator` converts cleaned pandas ``DataFrame``
-objects from datasets such as SWaT and HAI into overlapping window tensors
+objects from src.data such as SWaT and HAI into overlapping window tensors
 suitable for sequence modelling.
 """
 

@@ -15,8 +15,8 @@ import torch
 from torch import Tensor
 from torch.utils.data import DataLoader
 
-from datasets.contrastive_dataset import ContrastiveDataset
-from datasets.dataloader import (
+from src.data.contrastive_dataset import ContrastiveDataset
+from src.data.dataloader import (
     create_test_dataloader,
     create_train_dataloader,
     create_validation_dataloader,

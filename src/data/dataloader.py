@@ -19,7 +19,7 @@ from numpy.typing import NDArray
 from torch import Tensor
 from torch.utils.data import DataLoader
 
-from datasets.contrastive_dataset import ContrastiveDataset
+from src.data.contrastive_dataset import ContrastiveDataset
 
 logger = logging.getLogger(__name__)
 

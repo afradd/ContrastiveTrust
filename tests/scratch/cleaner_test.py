@@ -210,7 +210,7 @@ class IntegrationTests(unittest.TestCase):
 	def test_hai_slice_cleans_without_remaining_missing_values(self) -> None:
 		from pathlib import Path
 
-		from datasets.hai_loader import HAILoader
+		from src.data.hai_loader import HAILoader
 
 		repo = Path(__file__).resolve().parent.parent
 		data_path = repo / "data" / "raw" / "HAI" / "hai_test1.csv"
@@ -228,7 +228,7 @@ class IntegrationTests(unittest.TestCase):
 	def test_swat_slice_converts_alarm_columns(self) -> None:
 		from pathlib import Path
 
-		from datasets.swat_loader import SWaTLoader
+		from src.data.swat_loader import SWaTLoader
 
 		repo = Path(__file__).resolve().parent.parent
 		swat_path = repo / "data" / "raw" / "SWaT" / "SWaT_Dec2019.xlsx"
