@@ -65,6 +65,7 @@ class Evaluator:
         physics_features: torch.Tensor,
         y_true: torch.Tensor,
         metadata: Optional[List[Dict[str, Any]]] = None,
+        threshold: Optional[float] = None,
     ) -> Dict[str, float]:
         """Evaluate a single batch.
 
@@ -88,7 +89,11 @@ class Evaluator:
 
         y_true_np = y_true.detach().cpu().numpy().astype(int)
         y_score_np = preds.scores.detach().cpu().numpy()
-        y_pred_np = preds.is_anomaly.detach().cpu().numpy().astype(int)
+        
+        if threshold is not None:
+            y_pred_np = (y_score_np >= threshold).astype(int)
+        else:
+            y_pred_np = preds.is_anomaly.detach().cpu().numpy().astype(int)
 
         results = self.metrics.compute(
             y_true=y_true_np,
@@ -104,6 +109,7 @@ class Evaluator:
         self,
         loader: DataLoader,
         batch_unpacker: Callable[..., Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[List[Dict[str, Any]]]]] = default_batch_unpacker,
+        threshold: Optional[float] = None,
     ) -> Dict[str, float]:
         """Evaluate over a PyTorch DataLoader.
 
@@ -133,7 +139,13 @@ class Evaluator:
             
             y_true_all.extend(labels.detach().cpu().numpy().astype(int).tolist())
             y_score_all.extend(preds.scores.detach().cpu().numpy().tolist())
-            y_pred_all.extend(preds.is_anomaly.detach().cpu().numpy().astype(int).tolist())
+            
+            if threshold is not None:
+                batch_preds = (preds.scores.detach().cpu().numpy() >= threshold).astype(int)
+                y_pred_all.extend(batch_preds.tolist())
+            else:
+                y_pred_all.extend(preds.is_anomaly.detach().cpu().numpy().astype(int).tolist())
+                
             inf_times_all.extend([batch_latency / batch_size] * batch_size)
 
         logger.info("Finished evaluation. Computing metrics...")
@@ -154,6 +166,7 @@ class Evaluator:
         batch_size: int = 32,
         num_workers: int = 0,
         batch_unpacker: Callable[..., Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[List[Dict[str, Any]]]]] = default_batch_unpacker,
+        threshold: Optional[float] = None,
     ) -> Dict[str, float]:
         """Evaluate over a PyTorch Dataset.
 
@@ -173,7 +186,7 @@ class Evaluator:
             num_workers=num_workers,
             drop_last=False,
         )
-        return self.evaluate_loader(loader, batch_unpacker=batch_unpacker)
+        return self.evaluate_loader(loader, batch_unpacker=batch_unpacker, threshold=threshold)
 
     def save_results(self, path: Union[str, Path]) -> None:
         """Save the latest evaluation results to a JSON file.

@@ -90,6 +90,10 @@ class EvaluationMetrics:
         """
         y_true_np = np.asarray(y_true, dtype=int)
         y_score_np = np.asarray(y_score, dtype=float)
+        
+        if np.any(np.isnan(y_score_np)) or np.any(np.isinf(y_score_np)):
+            logger.warning("y_score contains NaN or Inf values. Sanitizing to zeros.")
+            y_score_np = np.nan_to_num(y_score_np, nan=0.0, posinf=0.0, neginf=0.0)
 
         y_pred_np = None
         if y_pred is not None:
@@ -100,6 +104,9 @@ class EvaluationMetrics:
         inf_times_np = None
         if inference_times is not None:
             inf_times_np = np.asarray(inference_times, dtype=float)
+            if np.any(np.isnan(inf_times_np)) or np.any(np.isinf(inf_times_np)):
+                logger.warning("inference_times contains NaN or Inf values. Sanitizing to zeros.")
+                inf_times_np = np.nan_to_num(inf_times_np, nan=0.0, posinf=0.0, neginf=0.0)
 
         self._validate_inputs(y_true_np, y_score_np, y_pred_np, inf_times_np)
 

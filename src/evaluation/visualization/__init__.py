@@ -15,6 +15,7 @@ from src.evaluation.visualization.distributions import DistributionVisualizer
 from src.evaluation.visualization.ablation import AblationVisualizer
 from src.evaluation.visualization.benchmarking import BenchmarkVisualizer
 from src.evaluation.visualization.exporter import DataExporter
+from src.evaluation.visualization.threshold_analysis import ThresholdVisualizer
 
 __all__ = [
     "BaseVisualizer",
@@ -29,4 +30,5 @@ __all__ = [
     "AblationVisualizer",
     "BenchmarkVisualizer",
     "DataExporter",
+    "ThresholdVisualizer",
 ]

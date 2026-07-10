@@ -87,3 +87,32 @@ def test_benchmark_runner_empty():
     assert report.throughput_fps == 0.0
     assert report.latency_ms_per_batch == 0.0
     assert report.latency_ms_per_sample == 0.0
+
+
+def test_benchmark_runner_cuda_memory():
+    """Test benchmark runner handles CUDA memory when specified."""
+    dataset = DummyDictDataset(size=5)
+    dataloader = DataLoader(dataset, batch_size=5)
+    
+    # We test the logic even if CUDA is not available on the test machine
+    runner = BenchmarkRunner(inference_fn=lambda x: None, device="cuda")
+    report = runner.run(dataloader, dataset_name="CUDA_Test")
+    
+    if torch.cuda.is_available():
+        assert report.gpu_memory_peak_mb is not None
+        assert report.gpu_memory_peak_mb >= 0
+    else:
+        assert report.gpu_memory_peak_mb is None
+
+
+def test_benchmark_runner_hai_swat_datasets():
+    """Test benchmark runner handles explicitly required IEEE datasets correctly."""
+    dataset = DummyDictDataset(size=5)
+    dataloader = DataLoader(dataset, batch_size=5)
+    runner = BenchmarkRunner(inference_fn=lambda x: None, device="cpu")
+    
+    report_hai = runner.run(dataloader, dataset_name="HAI")
+    assert report_hai.dataset_name == "HAI"
+    
+    report_swat = runner.run(dataloader, dataset_name="SWaT")
+    assert report_swat.dataset_name == "SWaT"
