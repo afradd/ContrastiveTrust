@@ -211,14 +211,14 @@ class BaseConsistencyLoss(ABC):
     @abstractmethod
     def compute(
         self,
-        encoder_embedding: torch.Tensor,
+        temporal_embedding: torch.Tensor,
         physics_embedding: torch.Tensor,
     ) -> torch.Tensor:
         """Compute the per-batch consistency loss scalar.
 
         Parameters
         ----------
-        encoder_embedding : torch.Tensor
+        temporal_embedding : torch.Tensor
             L2-normalised encoder representation of shape ``(B, D)``.
         physics_embedding : torch.Tensor
             L2-normalised physics representation of shape ``(B, D)``.
@@ -290,14 +290,14 @@ class CosineConsistencyLoss(BaseConsistencyLoss):
 
     def compute(
         self,
-        encoder_embedding: torch.Tensor,
+        temporal_embedding: torch.Tensor,
         physics_embedding: torch.Tensor,
     ) -> torch.Tensor:
         """Compute mean cosine-distance loss.
 
         Parameters
         ----------
-        encoder_embedding : torch.Tensor
+        temporal_embedding : torch.Tensor
             L2-normalised tensor of shape ``(B, D)``.
         physics_embedding : torch.Tensor
             L2-normalised tensor of shape ``(B, D)``.
@@ -307,7 +307,7 @@ class CosineConsistencyLoss(BaseConsistencyLoss):
         torch.Tensor
             Scalar in ``[0, 2]``; zero when embeddings are identical.
         """
-        enc = F.normalize(encoder_embedding, p=2, dim=1, eps=self._eps)
+        enc = F.normalize(temporal_embedding, p=2, dim=1, eps=self._eps)
         phy = F.normalize(physics_embedding, p=2, dim=1, eps=self._eps)
         # Cosine similarity per sample: (B,)
         cos_sim = (enc * phy).sum(dim=1)
@@ -339,14 +339,14 @@ class MSEConsistencyLoss(BaseConsistencyLoss):
 
     def compute(
         self,
-        encoder_embedding: torch.Tensor,
+        temporal_embedding: torch.Tensor,
         physics_embedding: torch.Tensor,
     ) -> torch.Tensor:
         """Compute mean-squared-error loss.
 
         Parameters
         ----------
-        encoder_embedding : torch.Tensor
+        temporal_embedding : torch.Tensor
             L2-normalised tensor of shape ``(B, D)``.
         physics_embedding : torch.Tensor
             L2-normalised tensor of shape ``(B, D)``.
@@ -356,7 +356,7 @@ class MSEConsistencyLoss(BaseConsistencyLoss):
         torch.Tensor
             Non-negative scalar; zero when embeddings are identical.
         """
-        diff = encoder_embedding - physics_embedding
+        diff = temporal_embedding - physics_embedding
         # Per-sample squared L2 norm averaged across the embedding dim (B,)
         per_sample = (diff * diff).mean(dim=1)
         return self._reduce(per_sample)
@@ -388,14 +388,14 @@ class HuberConsistencyLoss(BaseConsistencyLoss):
 
     def compute(
         self,
-        encoder_embedding: torch.Tensor,
+        temporal_embedding: torch.Tensor,
         physics_embedding: torch.Tensor,
     ) -> torch.Tensor:
         """Compute Huber (smooth L1) loss.
 
         Parameters
         ----------
-        encoder_embedding : torch.Tensor
+        temporal_embedding : torch.Tensor
             L2-normalised tensor of shape ``(B, D)``.
         physics_embedding : torch.Tensor
             L2-normalised tensor of shape ``(B, D)``.
@@ -407,7 +407,7 @@ class HuberConsistencyLoss(BaseConsistencyLoss):
         """
         # F.smooth_l1_loss with reduction="none" -> (B, D)
         element_wise = F.smooth_l1_loss(
-            encoder_embedding,
+            temporal_embedding,
             physics_embedding,
             reduction="none",
         )
@@ -454,14 +454,14 @@ class HybridConsistencyLoss(BaseConsistencyLoss):
 
     def compute(
         self,
-        encoder_embedding: torch.Tensor,
+        temporal_embedding: torch.Tensor,
         physics_embedding: torch.Tensor,
     ) -> torch.Tensor:
         """Compute alpha * CosineLoss + beta * MSELoss.
 
         Parameters
         ----------
-        encoder_embedding : torch.Tensor
+        temporal_embedding : torch.Tensor
             L2-normalised tensor of shape ``(B, D)``.
         physics_embedding : torch.Tensor
             L2-normalised tensor of shape ``(B, D)``.
@@ -471,8 +471,8 @@ class HybridConsistencyLoss(BaseConsistencyLoss):
         torch.Tensor
             Non-negative scalar.
         """
-        cosine_val = self._cosine.compute(encoder_embedding, physics_embedding)
-        mse_val = self._mse.compute(encoder_embedding, physics_embedding)
+        cosine_val = self._cosine.compute(temporal_embedding, physics_embedding)
+        mse_val = self._mse.compute(temporal_embedding, physics_embedding)
         return self._cosine_weight * cosine_val + self._mse_weight * mse_val
 
 
@@ -603,14 +603,14 @@ class PhysicsConsistencyLoss(nn.Module):
     @torch.jit.ignore
     def _validate_inputs(
         self,
-        encoder_embedding: torch.Tensor,
+        temporal_embedding: torch.Tensor,
         physics_embedding: torch.Tensor,
     ) -> None:
         """Validate encoder and physics embedding tensors.
 
         Parameters
         ----------
-        encoder_embedding : torch.Tensor
+        temporal_embedding : torch.Tensor
             Encoder representation; expected shape ``(B, D)``.
         physics_embedding : torch.Tensor
             Physics representation; expected shape ``(B, D)``.
@@ -623,7 +623,7 @@ class PhysicsConsistencyLoss(nn.Module):
             If shape, dtype, or value constraints are violated.
         """
         pairs = [
-            ("encoder_embedding", encoder_embedding),
+            ("temporal_embedding", temporal_embedding),
             ("physics_embedding", physics_embedding),
         ]
         for name, emb in pairs:
@@ -648,27 +648,27 @@ class PhysicsConsistencyLoss(nn.Module):
             if torch.isinf(emb).any():
                 raise ValueError(f"{name} contains Inf values")
 
-        if encoder_embedding.shape[0] != physics_embedding.shape[0]:
+        if temporal_embedding.shape[0] != physics_embedding.shape[0]:
             raise ValueError(
-                f"encoder_embedding and physics_embedding must have the "
+                f"temporal_embedding and physics_embedding must have the "
                 f"same batch size, got "
-                f"encoder_embedding.shape={tuple(encoder_embedding.shape)}, "
+                f"temporal_embedding.shape={tuple(temporal_embedding.shape)}, "
                 f"physics_embedding.shape={tuple(physics_embedding.shape)}"
             )
-        if encoder_embedding.shape[1] != physics_embedding.shape[1]:
+        if temporal_embedding.shape[1] != physics_embedding.shape[1]:
             raise ValueError(
-                f"encoder_embedding and physics_embedding must have the "
+                f"temporal_embedding and physics_embedding must have the "
                 f"same embedding dimension, got "
-                f"encoder_embedding.shape={tuple(encoder_embedding.shape)}, "
+                f"temporal_embedding.shape={tuple(temporal_embedding.shape)}, "
                 f"physics_embedding.shape={tuple(physics_embedding.shape)}"
             )
 
         logger.debug(
             "PhysicsConsistencyLoss | validated inputs: "
-            "encoder_embedding=%s, physics_embedding=%s, dtype=%s",
-            tuple(encoder_embedding.shape),
+            "temporal_embedding=%s, physics_embedding=%s, dtype=%s",
+            tuple(temporal_embedding.shape),
             tuple(physics_embedding.shape),
-            encoder_embedding.dtype,
+            temporal_embedding.dtype,
         )
 
     @torch.jit.ignore
@@ -778,14 +778,14 @@ class PhysicsConsistencyLoss(nn.Module):
 
     def forward(
         self,
-        encoder_embedding: torch.Tensor,
+        temporal_embedding: torch.Tensor,
         physics_embedding: torch.Tensor,
     ) -> Dict[str, object]:
         """Compute the physics consistency loss.
 
         Parameters
         ----------
-        encoder_embedding : torch.Tensor
+        temporal_embedding : torch.Tensor
             L2-normalised encoder representation of shape ``(B, D)``.
         physics_embedding : torch.Tensor
             L2-normalised physics representation of shape ``(B, D)``.
@@ -815,21 +815,21 @@ class PhysicsConsistencyLoss(nn.Module):
         The ``value`` key contains a detached copy of ``loss`` intended
         for tensorboard / metric loggers that must not retain the graph.
         """
-        self._validate_inputs(encoder_embedding, physics_embedding)
+        self._validate_inputs(temporal_embedding, physics_embedding)
 
-        batch_size = encoder_embedding.shape[0]
+        batch_size = temporal_embedding.shape[0]
         logger.info(
             "PhysicsConsistencyLoss forward | "
             "batch_size=%d | metric=%s | "
-            "encoder_embedding=%s | physics_embedding=%s",
+            "temporal_embedding=%s | physics_embedding=%s",
             batch_size,
             self._strategy.metric_name,
-            tuple(encoder_embedding.shape),
+            tuple(temporal_embedding.shape),
             tuple(physics_embedding.shape),
         )
 
         loss: torch.Tensor = self._strategy.compute(
-            encoder_embedding, physics_embedding
+            temporal_embedding, physics_embedding
         )
 
         logger.debug(

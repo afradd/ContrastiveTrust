@@ -1,2 +1,6 @@
-Dataset,Sensors,Normal Windows,Attack Windows
-SWaT,51,40000,5000
+Dataset,Split,Total Rows,Normal Rows,Attack Rows,Total Columns
+SWaT Feb19,Train,29160,29160,0,84
+SWaT Feb20,Validation,29160,29160,0,84
+SWaT Dec2019,Test A,13201,12296,905,84
+SWaT Mar11,Test B,28860,14400,14460,84
+HAI Test 1,Zero-shot Test,54000,51019,2981,88

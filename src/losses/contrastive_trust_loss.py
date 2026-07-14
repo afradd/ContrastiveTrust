@@ -180,7 +180,7 @@ class ContrastiveTrustLoss(nn.Module):
         :class:`~src.losses.nt_xent.NTXentLoss` with default hyper-params.
     physics_loss : torch.nn.Module, optional
         Physics-consistency objective.  Must be callable as
-        ``module(encoder_embedding, physics_embedding)`` and return a dict
+        ``module(temporal_embedding, physics_embedding)`` and return a dict
         containing a scalar ``"loss"`` entry.  Defaults to a
         :class:`~src.losses.physics_consistency.PhysicsConsistencyLoss`
         with default hyper-params.
@@ -373,7 +373,7 @@ class ContrastiveTrustLoss(nn.Module):
         self,
         projection_view_1: torch.Tensor,
         projection_view_2: torch.Tensor,
-        encoder_embedding: torch.Tensor,
+        temporal_embedding: torch.Tensor,
         physics_embedding: torch.Tensor,
     ) -> None:
         """Validate all four public forward inputs.
@@ -396,16 +396,16 @@ class ContrastiveTrustLoss(nn.Module):
             "projection_view_2", projection_view_2,
         )
         self._validate_pair(
-            "encoder_embedding", encoder_embedding,
+            "temporal_embedding", temporal_embedding,
             "physics_embedding", physics_embedding,
         )
 
         batch = projection_view_1.shape[0]
-        if encoder_embedding.shape[0] != batch:
+        if temporal_embedding.shape[0] != batch:
             raise ValueError(
                 f"All inputs must share the same batch size; "
                 f"projection views have batch {batch} but "
-                f"encoder_embedding has batch {encoder_embedding.shape[0]}"
+                f"temporal_embedding has batch {temporal_embedding.shape[0]}"
             )
 
         logger.debug(
@@ -413,7 +413,7 @@ class ContrastiveTrustLoss(nn.Module):
             "projection_dim=%d | embedding_dim=%d | dtype=%s",
             batch,
             projection_view_1.shape[1],
-            encoder_embedding.shape[1],
+            temporal_embedding.shape[1],
             projection_view_1.dtype,
         )
 
@@ -638,7 +638,7 @@ class ContrastiveTrustLoss(nn.Module):
         self,
         projection_view_1: torch.Tensor,
         projection_view_2: torch.Tensor,
-        encoder_embedding: torch.Tensor,
+        temporal_embedding: torch.Tensor,
         physics_embedding: torch.Tensor,
     ) -> Dict[str, object]:
         """Compute the unified multi-objective ContrastiveTrust loss.
@@ -651,7 +651,7 @@ class ContrastiveTrustLoss(nn.Module):
         projection_view_2 : torch.Tensor
             L2-normalised projected embeddings of the second augmented
             view, shape ``(B, P)``.
-        encoder_embedding : torch.Tensor
+        temporal_embedding : torch.Tensor
             Fused encoder representation, shape ``(B, D)``.
         physics_embedding : torch.Tensor
             Physics-stream representation, shape ``(B, D)``.
@@ -685,7 +685,7 @@ class ContrastiveTrustLoss(nn.Module):
         self._validate_inputs(
             projection_view_1,
             projection_view_2,
-            encoder_embedding,
+            temporal_embedding,
             physics_embedding,
         )
 
@@ -694,7 +694,7 @@ class ContrastiveTrustLoss(nn.Module):
             projection_view_1, projection_view_2
         )
         physics_out = self._physics_loss(
-            encoder_embedding, physics_embedding
+            temporal_embedding, physics_embedding
         )
         contrastive_loss = contrastive_out["loss"]
         physics_loss = physics_out["loss"]

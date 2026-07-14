@@ -126,6 +126,7 @@ class Trainer:
         self.loss_fn.train()
 
         total_loss = 0.0
+        total_physics_loss = 0.0
         num_batches = 0
 
         self.optimizer.zero_grad(set_to_none=True)
@@ -152,10 +153,11 @@ class Trainer:
                 out = self.loss_fn(
                     projection_view_1=proj1,
                     projection_view_2=proj2,
-                    encoder_embedding=enc1["embedding"],
+                    temporal_embedding=enc1["temporal_embedding"],
                     physics_embedding=enc1["physics_embedding"],
                 )
                 loss = out["loss"] / self.gradient_accumulation_steps
+                physics_loss_val = out["physics_loss"].item()
 
             self.amp.scale_and_backward(loss)
 
@@ -170,6 +172,7 @@ class Trainer:
                 self.optimizer.zero_grad(set_to_none=True)
 
             total_loss += loss.item() * self.gradient_accumulation_steps
+            total_physics_loss += physics_loss_val
             num_batches += 1
 
             for callback in self.callbacks:
@@ -190,8 +193,9 @@ class Trainer:
             self.scheduler.step()
 
         avg_loss = total_loss / max(1, num_batches)
-        logger.debug("train_epoch complete | train_loss=%.4f", avg_loss)
-        return {"train_loss": avg_loss}
+        avg_physics_loss = total_physics_loss / max(1, num_batches)
+        logger.debug("train_epoch complete | train_loss=%.4f | train_physics_loss=%.4f", avg_loss, avg_physics_loss)
+        return {"train_loss": avg_loss, "train_physics_loss": avg_physics_loss}
 
     @torch.no_grad()
     def validate_epoch(self, dataloader: Iterable[Dict[str, torch.Tensor]]) -> Dict[str, float]:
@@ -212,6 +216,7 @@ class Trainer:
         self.loss_fn.eval()
 
         total_loss = 0.0
+        total_physics_loss = 0.0
         num_batches = 0
 
         for batch in dataloader:
@@ -230,17 +235,20 @@ class Trainer:
                 out = self.loss_fn(
                     projection_view_1=proj1,
                     projection_view_2=proj2,
-                    encoder_embedding=enc1["embedding"],
+                    temporal_embedding=enc1["temporal_embedding"],
                     physics_embedding=enc1["physics_embedding"],
                 )
                 loss = out["loss"]
+                physics_loss_val = out["physics_loss"].item()
 
             total_loss += loss.item()
+            total_physics_loss += physics_loss_val
             num_batches += 1
 
         avg_loss = total_loss / max(1, num_batches)
-        logger.debug("validate_epoch complete | val_loss=%.4f", avg_loss)
-        return {"val_loss": avg_loss}
+        avg_physics_loss = total_physics_loss / max(1, num_batches)
+        logger.debug("validate_epoch complete | val_loss=%.4f | val_physics_loss=%.4f", avg_loss, avg_physics_loss)
+        return {"val_loss": avg_loss, "val_physics_loss": avg_physics_loss}
 
     def fit(
         self,

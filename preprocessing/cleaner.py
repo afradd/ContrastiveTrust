@@ -136,6 +136,17 @@ class DataCleaner:
 
 		working = self._normalize_empty_strings(working)
 
+		bad_input_count = self._coerce_bad_input_to_nan(
+			working,
+			preserved_columns=preserved_columns,
+		)
+		if bad_input_count:
+			self._log_operation(
+				operations,
+				"Coerced 'Bad Input' sentinel strings to NaN",
+				total_coerced=bad_input_count,
+			)
+
 		converted_active_inactive = self._convert_active_inactive_columns(
 			working,
 			preserved_columns=preserved_columns,
@@ -288,6 +299,49 @@ class DataCleaner:
 		"""Convert blank string values to missing values."""
 		logger.info("Normalizing blank string values to missing values")
 		return dataframe.replace(r"^\s*$", np.nan, regex=True)
+
+	@staticmethod
+	def _coerce_bad_input_to_nan(
+		dataframe: pd.DataFrame,
+		preserved_columns: set[str],
+	) -> int:
+		"""Replace the OPC-DA sentinel string ``"Bad Input"`` with NaN.
+
+		The 2026 SWaT CSV exports contain scattered ``"Bad Input"`` values
+		inside normally-numeric sensor, actuator, STATE, and alarm columns
+		(e.g. ``FIT201.Pv``, ``P2_STATE``).  These must be coerced to NaN
+		**before** Active/Inactive conversion and numeric string conversion
+		so that downstream imputation can fill them.
+
+		This method operates on ALL columns (excluding preserved timestamp
+		and label columns) to ensure no ``"Bad Input"`` values survive into
+		the numeric pipeline.
+
+		Returns:
+			The total number of cells coerced.
+		"""
+		total_coerced = 0
+		for column in dataframe.columns:
+			if column in preserved_columns:
+				continue
+			series = dataframe[column]
+			if not (pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series)):
+				continue
+			mask = series.astype(str).str.strip().str.lower() == "bad input"
+			count = int(mask.sum())
+			if count > 0:
+				dataframe.loc[mask, column] = np.nan
+				total_coerced += count
+
+		if total_coerced:
+			logger.info(
+				"Coerced %d 'Bad Input' sentinel value(s) to NaN across all columns",
+				total_coerced,
+			)
+		else:
+			logger.info("No 'Bad Input' sentinel values found")
+
+		return total_coerced
 
 	def _convert_active_inactive_columns(
 		self,

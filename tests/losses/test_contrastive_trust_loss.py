@@ -67,7 +67,7 @@ def _make_inputs(
     device: torch.device | str = "cpu",
     seed: int = 0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Return ``(view_1, view_2, encoder_embedding, physics_embedding)``.
+    """Return ``(view_1, view_2, temporal_embedding, physics_embedding)``.
 
     Projection views are L2-normalised (as produced by the projection
     head); encoder / physics embeddings are L2-normalised as expected by
@@ -705,7 +705,7 @@ class TestInputValidation:
     def test_encoder_not_tensor_raises(self) -> None:
         fn = _default_loss_fn()
         v1, v2, _, phy = _make_inputs()
-        with pytest.raises(TypeError, match="encoder_embedding"):
+        with pytest.raises(TypeError, match="temporal_embedding"):
             fn(v1, v2, 42, phy)  # type: ignore[arg-type]
 
     def test_integer_dtype_raises(self) -> None:

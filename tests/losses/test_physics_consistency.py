@@ -644,7 +644,7 @@ class TestInputValidation:
     def test_encoder_not_tensor_raises(self):
         fn = _default_loss_fn()
         _, phy = _make_embeddings()
-        with pytest.raises(TypeError, match="encoder_embedding must be a torch.Tensor"):
+        with pytest.raises(TypeError, match="temporal_embedding must be a torch.Tensor"):
             fn("not_a_tensor", phy)  # type: ignore[arg-type]
 
     def test_physics_not_tensor_raises(self):

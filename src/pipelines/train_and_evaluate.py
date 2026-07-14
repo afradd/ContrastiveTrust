@@ -34,8 +34,10 @@ from preprocessing.cleaner import DataCleaner
 from preprocessing.normalizer import FeatureNormalizer
 from preprocessing.windowing import SlidingWindowGenerator
 from src.data.swat_loader import SWaTLoader
+from src.data.swat_attack_labeler import SWaTAttackLabeler
 from src.data.view_generator import ContrastiveViewGenerator, ContrastiveViewGeneratorConfig
 from src.models.encoder import DualStreamEncoder, EncoderConfig
+from src.models.fusion import FusionConfig
 from src.models.physics_encoder import PhysicsEncoderConfig
 from src.models.temporal_encoder import TemporalEncoderConfig
 from src.models.projection_head import ProjectionHead, ProjectionHeadConfig
@@ -52,56 +54,12 @@ from src.evaluation.embedding_bank import EmbeddingBank
 from src.evaluation.anomaly_scorer import AnomalyScorer
 from src.evaluation.threshold import ThresholdEstimator
 from src.evaluation.zero_shot_detector import ZeroShotDetector
+from src.features.channel_alignment import build_typed_frame, NUM_CHANNELS, PHYSICS_DIM
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Type-based channel grouping
-# ---------------------------------------------------------------------------
-TYPE_PATTERNS = [
-    ("flow", re.compile(r"FIT|_FT\d|FCV", re.I)),
-    ("level", re.compile(r"LIT|_LT\d|LCV|_LL\d|_LH\d|_LD\b", re.I)),
-    ("pressure", re.compile(r"PIT|PCV", re.I)),
-    ("temperature", re.compile(r"TIT|_TT\d", re.I)),
-    ("analyzer", re.compile(r"AIT|_SIT\d|_VIBTR|_VT\d|_VTR\d", re.I)),
-    ("actuator", re.compile(r"^MV\d|Status$|_PP\d|_SOL\d|_GOV|_ST_(FD|PO|PS|GOV)", re.I)),
-]
 
-TYPE_NAMES = [name for name, _ in TYPE_PATTERNS]
-NUM_CHANNELS = len(TYPE_NAMES)
-PHYSICS_DIM = NUM_CHANNELS * 3
-
-def classify_columns(columns: list[str]) -> dict[str, list[str]]:
-    groups: dict[str, list[str]] = {name: [] for name, _ in TYPE_PATTERNS}
-    for col in columns:
-        for name, pattern in TYPE_PATTERNS:
-            if pattern.search(col):
-                groups[name].append(col)
-                break
-    return groups
-
-def build_typed_frame(df: pd.DataFrame, feature_columns: list[str], keep: list[str]) -> pd.DataFrame:
-    groups = classify_columns(feature_columns)
-    out = {}
-    for type_name, cols in groups.items():
-        cols = [c for c in cols if c in df.columns]
-        if not cols:
-            out[type_name] = np.zeros(len(df))
-            continue
-        block = df[cols].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=np.float64)
-        mu = np.nanmean(block, axis=0, keepdims=True)
-        sd = np.nanstd(block, axis=0, keepdims=True)
-        sd[sd == 0] = 1.0
-        z = (block - mu) / sd
-        z = np.nan_to_num(z, nan=0.0)
-        out[type_name] = z.mean(axis=1)
-    
-    result = pd.DataFrame(out)
-    keep_cols = [c for c in keep if c in df.columns]
-    for c in keep_cols:
-        result[c] = df[c].to_numpy()
-    return result
 
 def physics_vector(window: np.ndarray) -> np.ndarray:
     mean = window.mean(axis=0)
@@ -179,12 +137,16 @@ def load_data(
 
     hai_feature_cols = [c for c in hai_df.columns if c not in ("timestamp", "label")]
 
+    # Label SWaT dataset
+    logger.info("Labeling SWaT data...")
+    swat_df = SWaTAttackLabeler(timestamp_column="t_stamp").label(swat_df)
+
     logger.info("Cleaning data...")
     swat_clean, swat_meta = DataCleaner(timestamp_column="t_stamp").clean(swat_df)
     hai_clean, hai_meta = DataCleaner(timestamp_column="timestamp", label_column="label").clean(hai_df)
 
     logger.info("Grouping columns by physics type...")
-    swat_typed = build_typed_frame(swat_clean, swat_feature_cols, keep=["t_stamp"])
+    swat_typed = build_typed_frame(swat_clean, swat_feature_cols, keep=["t_stamp", "label"])
     hai_typed = build_typed_frame(hai_clean, hai_feature_cols, keep=["timestamp", "label"])
 
     logger.info("Chronological split (SWaT: 70/15/15 train/val/test-normal)...")
@@ -196,9 +158,23 @@ def load_data(
 
     logger.info("Normalizing...")
     normalizer = FeatureNormalizer(timestamp_column="t_stamp")
-    swat_train_norm = normalizer.fit_transform(swat_train)
-    swat_val_norm = normalizer.transform(swat_val)
-    swat_test_norm = normalizer.transform(swat_test)
+    swat_train_norm = normalizer.fit_transform(swat_train.drop(columns=["label"], errors="ignore"))
+    if "label" in swat_train.columns:
+        swat_train_norm["label"] = swat_train["label"].to_numpy()
+    if "t_stamp" not in swat_train_norm.columns and "t_stamp" in swat_train.columns:
+        swat_train_norm["t_stamp"] = swat_train["t_stamp"].to_numpy()
+
+    swat_val_norm = normalizer.transform(swat_val.drop(columns=["label"], errors="ignore"))
+    if "label" in swat_val.columns:
+        swat_val_norm["label"] = swat_val["label"].to_numpy()
+    if "t_stamp" not in swat_val_norm.columns and "t_stamp" in swat_val.columns:
+        swat_val_norm["t_stamp"] = swat_val["t_stamp"].to_numpy()
+
+    swat_test_norm = normalizer.transform(swat_test.drop(columns=["label"], errors="ignore"))
+    if "label" in swat_test.columns:
+        swat_test_norm["label"] = swat_test["label"].to_numpy()
+    if "t_stamp" not in swat_test_norm.columns and "t_stamp" in swat_test.columns:
+        swat_test_norm["t_stamp"] = swat_test["t_stamp"].to_numpy()
 
     hai_normalizer_input = hai_typed.rename(columns={"timestamp": "t_stamp"})
     hai_norm = normalizer.transform(hai_normalizer_input.drop(columns=["label"], errors="ignore"))
@@ -211,9 +187,23 @@ def load_data(
 
     logger.info("Extracting sliding windows...")
     win_gen_swat = SlidingWindowGenerator(window_size=window_size, stride=stride, timestamp_column="t_stamp")
+    
+    # SWAT TRAIN
     swat_train_win = win_gen_swat.generate(swat_train_norm).windows.astype(np.float32)
+    
+    # SWAT VAL
     swat_val_win = win_gen_swat.generate(swat_val_norm).windows.astype(np.float32)
-    swat_test_win = win_gen_swat.generate(swat_test_norm).windows.astype(np.float32)
+    
+    # SWAT TEST (with labels)
+    has_labels_swat = "label" in swat_test_norm.columns
+    win_gen_swat_test = SlidingWindowGenerator(
+        window_size=window_size, stride=stride, timestamp_column="t_stamp",
+        label_column="label" if has_labels_swat else None,
+        return_labels=has_labels_swat, label_method="max" if has_labels_swat else None,
+    )
+    swat_test_batch = win_gen_swat_test.generate(swat_test_norm)
+    swat_test_win = swat_test_batch.windows.astype(np.float32)
+    swat_test_labels = swat_test_batch.labels.astype(np.int64) if has_labels_swat else None
 
     has_labels = "label" in hai_norm.columns
     win_gen_hai = SlidingWindowGenerator(
@@ -243,7 +233,7 @@ def load_data(
     val_score_ds = ScoringDataset(swat_val_win, swat_val_phy)
     val_score_loader = DataLoader(val_score_ds, batch_size=batch_size, shuffle=False)
 
-    swat_test_ds = ScoringDataset(swat_test_win, swat_test_phy)
+    swat_test_ds = ScoringDataset(swat_test_win, swat_test_phy, swat_test_labels)
     swat_test_loader = DataLoader(swat_test_ds, batch_size=batch_size, shuffle=False)
 
     hai_ds = ScoringDataset(hai_win, hai_phy, hai_labels)
@@ -251,17 +241,39 @@ def load_data(
 
     return train_loader, val_loader, normal_loader, val_score_loader, swat_test_loader, hai_loader_eval
 
-def build_model(device: str) -> Tuple[DualStreamEncoder, ProjectionHead, ContrastiveTrustLoss]:
-    encoder_config = EncoderConfig(
-        temporal=TemporalEncoderConfig(input_channels=NUM_CHANNELS),
-        physics=PhysicsEncoderConfig(input_dim=PHYSICS_DIM),
-    )
-    proj_config = ProjectionHeadConfig(input_dim=encoder_config.temporal.embedding_dim)
+def build_model(device: str, contrastive_weight: float = 1.0, physics_weight: float = 1.0,
+                dropout: float = 0.2, small_model: bool = False) -> Tuple[DualStreamEncoder, ProjectionHead, ContrastiveTrustLoss]:
+    if small_model:
+        encoder_config = EncoderConfig(
+            temporal=TemporalEncoderConfig(
+                input_channels=NUM_CHANNELS, embedding_dim=128,
+                hidden_channels=(32, 64, 128), kernel_sizes=(7, 5, 3), dropout=dropout,
+            ),
+            physics=PhysicsEncoderConfig(
+                input_dim=PHYSICS_DIM, embedding_dim=128,
+                hidden_dims=(256, 128), dropout=dropout,
+            ),
+            fusion=FusionConfig(embedding_dim=128),
+        )
+        proj_config = ProjectionHeadConfig(
+            input_dim=128, hidden_dim=128, output_dim=64, dropout=dropout,
+        )
+    else:
+        encoder_config = EncoderConfig(
+            temporal=TemporalEncoderConfig(input_channels=NUM_CHANNELS, dropout=dropout),
+            physics=PhysicsEncoderConfig(input_dim=PHYSICS_DIM, dropout=dropout),
+        )
+        proj_config = ProjectionHeadConfig(
+            input_dim=encoder_config.temporal.embedding_dim, dropout=dropout,
+        )
     loss_config = ContrastiveTrustLossConfig()
 
     encoder = DualStreamEncoder(encoder_config).to(device)
     projection_head = ProjectionHead(proj_config).to(device)
     loss_fn = ContrastiveTrustLoss(loss_config).to(device)
+    loss_fn.set_weights({"contrastive": contrastive_weight, "physics": physics_weight})
+    logger.info("Model built | small_model=%s | dropout=%.2f | params=%s",
+                small_model, dropout, encoder.parameter_count())
     return encoder, projection_head, loss_fn
 
 def train(
@@ -272,10 +284,12 @@ def train(
     val_loader: DataLoader,
     epochs: int,
     log_dir: Path,
-    device: str
+    device: str,
+    weight_decay: float = 1e-4,
+    patience: int = 8,
 ) -> list[Dict[str, float]]:
-    logger.info(f"Training for {epochs} epochs...")
-    opt_config = OptimizerConfig(name="AdamW", lr=1e-3, weight_decay=1e-4)
+    logger.info(f"Training for {epochs} epochs | weight_decay={weight_decay} | patience={patience}")
+    opt_config = OptimizerConfig(name="AdamW", lr=1e-3, weight_decay=weight_decay)
     optimizer = create_optimizer(list(encoder.parameters()) + list(projection_head.parameters()), opt_config)
     sched_config = SchedulerConfig(name="CosineAnnealingLR", kwargs={"T_max": epochs})
     scheduler = create_scheduler(optimizer, sched_config)
@@ -283,7 +297,7 @@ def train(
     callbacks: list[Callback] = [
         MetricsLogger(log_dir=log_dir),
         ModelCheckpoint(filepath=log_dir / "best_model.pt", monitor="val_loss", mode="min"),
-        EarlyStopping(monitor="val_loss", patience=6, mode="min"),
+        EarlyStopping(monitor="val_loss", patience=patience, mode="min"),
     ]
 
     trainer = Trainer(
@@ -323,20 +337,21 @@ def evaluate(
     out_dir: Path,
     device: str
 ):
+    # --- HAI Evaluation ---
     logger.info("Evaluating on HAI test set...")
     hai_metrics = detector.evaluate(hai_loader_eval)
     
     all_scores, all_labels = [], []
     for window, physics, labels in hai_loader_eval:
         scores = detector.score(window, physics)
-        all_scores.append(scores.cpu().numpy())
-        all_labels.append(labels.cpu().numpy())
+        all_scores.append(scores.cpu().view(-1).numpy())
+        all_labels.append(labels.cpu().view(-1).numpy())
     hai_scores = np.concatenate(all_scores)
     hai_labels_arr = np.concatenate(all_labels).astype(int)
     hai_threshold = detector.threshold_estimator.predict_threshold()
     hai_preds = (hai_scores > hai_threshold).astype(int)
-
-    full_metrics = {
+    
+    hai_full_metrics = {
         "accuracy": float(accuracy_score(hai_labels_arr, hai_preds)),
         "precision": float(precision_score(hai_labels_arr, hai_preds, zero_division=0)),
         "recall": float(recall_score(hai_labels_arr, hai_preds, zero_division=0)),
@@ -348,7 +363,45 @@ def evaluate(
         "n_attack_windows": int(hai_labels_arr.sum()),
     }
     
-    logger.info(f"HAI zero-shot metrics: {json.dumps(full_metrics, indent=2)}")
+    logger.info(f"HAI zero-shot metrics: {json.dumps(hai_full_metrics, indent=2)}")
+
+    # --- SWaT Evaluation ---
+    logger.info("Evaluating on SWaT test set...")
+    swat_metrics = detector.evaluate(swat_test_loader)
+    
+    all_swat_scores, all_swat_labels = [], []
+    for batch in swat_test_loader:
+        if len(batch) == 3:
+            window, physics, labels = batch
+        else:
+            window, physics = batch
+            labels = torch.zeros(window.shape[0])
+            
+        scores = detector.score(window, physics)
+        all_swat_scores.append(scores.cpu().view(-1).numpy())
+        all_swat_labels.append(labels.cpu().view(-1).numpy())
+        
+    swat_scores = np.concatenate(all_swat_scores)
+    swat_labels_arr = np.concatenate(all_swat_labels).astype(int)
+    swat_preds = (swat_scores > hai_threshold).astype(int)
+    
+    swat_full_metrics = {
+        "accuracy": float(accuracy_score(swat_labels_arr, swat_preds)),
+        "precision": float(precision_score(swat_labels_arr, swat_preds, zero_division=0)),
+        "recall": float(recall_score(swat_labels_arr, swat_preds, zero_division=0)),
+        "f1": float(f1_score(swat_labels_arr, swat_preds, zero_division=0)),
+        "roc_auc": float(swat_metrics["auroc"]),
+        "pr_auc": float(swat_metrics["auprc"]),
+        "threshold": float(hai_threshold),
+        "n_windows": int(len(swat_labels_arr)),
+        "n_attack_windows": int(swat_labels_arr.sum()),
+    }
+    
+    logger.info(f"SWaT in-domain metrics: {json.dumps(swat_full_metrics, indent=2)}")
+    
+    # Compute Delta-F1
+    delta_f1 = hai_full_metrics["f1"] - swat_full_metrics["f1"]
+    logger.info(f"Delta-F1 Transfer Gap (HAI - SWaT): {delta_f1:.4f}")
 
     if out_dir:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -358,8 +411,16 @@ def evaluate(
         with open(out_dir / "tables" / "training_history.json", "w") as f:
             json.dump(history, f, indent=2)
         with open(out_dir / "tables" / "hai_zero_shot_metrics.json", "w") as f:
-            json.dump(full_metrics, f, indent=2)
-        pd.DataFrame([full_metrics]).to_csv(out_dir / "tables" / "metrics.csv", index=False)
+            json.dump(hai_full_metrics, f, indent=2)
+        with open(out_dir / "tables" / "swat_indomain_metrics.json", "w") as f:
+            json.dump(swat_full_metrics, f, indent=2)
+        
+        metrics_df = pd.DataFrame([
+            {"dataset": "HAI", **hai_full_metrics},
+            {"dataset": "SWaT", **swat_full_metrics},
+            {"dataset": "Delta", "f1": delta_f1}
+        ])
+        metrics_df.to_csv(out_dir / "tables" / "metrics.csv", index=False)
 
         # Plotting
         logger.info("Generating plots...")
@@ -377,36 +438,41 @@ def evaluate(
         plt.savefig(FIG / "training_loss_curve.pdf"); plt.savefig(FIG / "training_loss_curve.png", dpi=150); plt.close()
 
         # Score distribution
-        swat_test_scores = []
-        for window, physics in swat_test_loader:
-            swat_test_scores.append(detector.score(window, physics).cpu().numpy())
-        swat_test_scores = np.concatenate(swat_test_scores)
-        
         plt.figure(figsize=(7, 4.5))
-        plt.hist(swat_test_scores, bins=30, alpha=0.5, label=f"SWaT held-out (normal, n={len(swat_test_scores)})", density=True)
+        plt.hist(swat_scores[swat_labels_arr == 0], bins=30, alpha=0.5, label=f"SWaT normal (n={(swat_labels_arr==0).sum()})", density=True)
+        if (swat_labels_arr == 1).sum() > 0:
+            plt.hist(swat_scores[swat_labels_arr == 1], bins=30, alpha=0.5, label=f"SWaT attack (n={(swat_labels_arr==1).sum()})", density=True)
         plt.hist(hai_scores[hai_labels_arr == 0], bins=30, alpha=0.5, label=f"HAI normal (n={(hai_labels_arr==0).sum()})", density=True)
-        plt.hist(hai_scores[hai_labels_arr == 1], bins=30, alpha=0.5, label=f"HAI attack (n={(hai_labels_arr==1).sum()})", density=True)
+        if (hai_labels_arr == 1).sum() > 0:
+            plt.hist(hai_scores[hai_labels_arr == 1], bins=30, alpha=0.5, label=f"HAI attack (n={(hai_labels_arr==1).sum()})", density=True)
         plt.axvline(hai_threshold, color="k", linestyle="--", label=f"Threshold ({hai_threshold:.2f})")
         plt.xlabel("Anomaly score"); plt.ylabel("Density"); plt.title("Anomaly Score Distribution")
         plt.legend(fontsize=8); plt.tight_layout()
         plt.savefig(FIG / "score_distribution.pdf"); plt.savefig(FIG / "score_distribution.png", dpi=150); plt.close()
 
         # ROC Curve
+        plt.figure(figsize=(5, 5))
         if len(np.unique(hai_labels_arr)) > 1:
             fpr, tpr, _ = roc_curve(hai_labels_arr, hai_scores)
-            plt.figure(figsize=(5, 5))
-            plt.plot(fpr, tpr, label=f"ROC-AUC = {full_metrics['roc_auc']:.3f}")
+            plt.plot(fpr, tpr, label=f"HAI ROC-AUC = {hai_full_metrics['roc_auc']:.3f}")
+        if len(np.unique(swat_labels_arr)) > 1:
+            fpr, tpr, _ = roc_curve(swat_labels_arr, swat_scores)
+            plt.plot(fpr, tpr, label=f"SWaT ROC-AUC = {swat_full_metrics['roc_auc']:.3f}")
             plt.plot([0, 1], [0, 1], "k--", alpha=0.3)
             plt.xlabel("False Positive Rate"); plt.ylabel("True Positive Rate")
             plt.title("Zero-Shot ROC Curve (SWaT to HAI)"); plt.legend(); plt.tight_layout()
             plt.savefig(FIG / "roc_curve.pdf"); plt.savefig(FIG / "roc_curve.png", dpi=150); plt.close()
 
         # PR Curve
+        plt.figure(figsize=(5, 5))
         if len(np.unique(hai_labels_arr)) > 1:
             prec, rec, _ = precision_recall_curve(hai_labels_arr, hai_scores)
-            plt.figure(figsize=(5, 5))
-            plt.plot(rec, prec, label=f"PR-AUC = {full_metrics['pr_auc']:.3f}")
-            plt.axhline(hai_labels_arr.mean(), color="k", linestyle="--", alpha=0.3, label="Random (base rate)")
+            plt.plot(rec, prec, label=f"HAI PR-AUC = {hai_full_metrics['pr_auc']:.3f}")
+            plt.axhline(hai_labels_arr.mean(), color="C0", linestyle="--", alpha=0.3)
+        if len(np.unique(swat_labels_arr)) > 1:
+            prec, rec, _ = precision_recall_curve(swat_labels_arr, swat_scores)
+            plt.plot(rec, prec, label=f"SWaT PR-AUC = {swat_full_metrics['pr_auc']:.3f}")
+            plt.axhline(swat_labels_arr.mean(), color="C1", linestyle="--", alpha=0.3)
             plt.xlabel("Recall"); plt.ylabel("Precision")
             plt.title("Zero-Shot PR Curve (SWaT to HAI)"); plt.legend(); plt.tight_layout()
             plt.savefig(FIG / "pr_curve.pdf"); plt.savefig(FIG / "pr_curve.png", dpi=150); plt.close()
@@ -431,6 +497,12 @@ def main():
     parser.add_argument("--stride", type=int, default=20, help="Stride for SlidingWindowGenerator")
     parser.add_argument("--epochs", type=int, default=15, help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, default=32, help="Batch size")
+    parser.add_argument("--contrastive-weight", type=float, default=1.0)
+    parser.add_argument("--physics-weight", type=float, default=1.0)
+    parser.add_argument("--dropout", type=float, default=0.2, help="Dropout probability for all model components")
+    parser.add_argument("--weight-decay", type=float, default=1e-4, help="Weight decay for AdamW optimizer")
+    parser.add_argument("--patience", type=int, default=8, help="Early stopping patience")
+    parser.add_argument("--small-model", action="store_true", help="Use reduced-capacity model (halved hidden dims)")
     parser.add_argument("--out-dir", type=str, default="outputs", help="Output directory for plots and metrics")
     parser.add_argument("--log-dir", type=str, default="logs/training_real", help="Output directory for logs and models")
     parser.add_argument("--device", type=str, default="cpu", help="Device to use for training")
@@ -453,7 +525,11 @@ def main():
     )
 
     # 2. Build Model
-    encoder, projection_head, loss_fn = build_model(device=args.device)
+    encoder, projection_head, loss_fn = build_model(
+        device=args.device, contrastive_weight=args.contrastive_weight,
+        physics_weight=args.physics_weight, dropout=args.dropout,
+        small_model=args.small_model,
+    )
 
     # 3. Train
     history = train(
@@ -464,7 +540,9 @@ def main():
         val_loader=val_loader,
         epochs=args.epochs,
         log_dir=log_dir,
-        device=args.device
+        device=args.device,
+        weight_decay=args.weight_decay,
+        patience=args.patience,
     )
 
     # 4. Build Detector

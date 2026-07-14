@@ -224,8 +224,8 @@ class ZeroShotDetector:
                 raise ValueError("Loader must yield at least (window, physics_features, labels).")
                 
             scores = self.score(window, physics)
-            all_scores.append(scores.cpu())
-            all_labels.append(labels.cpu())
+            all_scores.append(scores.cpu().view(-1))
+            all_labels.append(labels.cpu().view(-1))
             
         if not all_scores:
             return {"auroc": 0.0, "auprc": 0.0, "f1": 0.0}
