@@ -199,21 +199,21 @@ def main():
     # ── 3. Dataset Statistics ─────────────────────────────────────────
     stats = []
     
-    def _add_stat(name, df, split):
+    def _add_stat(name, split, win, lbl, num_sensors):
         stats.append({
             "Dataset": name,
             "Split": split,
-            "Total Rows": len(df),
-            "Normal Rows": int((df["label"] == 0).sum()),
-            "Attack Rows": int((df["label"] == 1).sum()),
-            "Total Columns": len(df.columns)
+            "Total Windows": len(win),
+            "Normal Windows": int((lbl == 0).sum()),
+            "Attack Windows": int((lbl == 1).sum()),
+            "Sensors": num_sensors
         })
         
-    _add_stat("SWaT Feb19", train_df, "Train")
-    _add_stat("SWaT Feb20", val_df, "Validation")
-    _add_stat("SWaT Dec2019", test_a_df, "Test A")
-    _add_stat("SWaT Mar11", test_b_df, "Test B")
-    _add_stat("HAI Test 1", hai_df, "Zero-shot Test")
+    _add_stat("SWaT Feb19", "Train", train_win, train_lbl, len(feature_cols_swat))
+    _add_stat("SWaT Feb20", "Validation", val_win, val_lbl, len(feature_cols_swat))
+    _add_stat("SWaT Dec2019", "Test A", test_a_win, test_a_lbl, len(feature_cols_swat))
+    _add_stat("SWaT Mar11", "Test B", test_b_win, test_b_lbl, len(feature_cols_swat))
+    _add_stat("HAI Test 1", "Zero-shot Test", hai_win, hai_lbl, len(feature_cols_hai))
     
     stats_df = pd.DataFrame(stats)
     stats_df.to_csv(tables_dir / "dataset_statistics.csv", index=False)
@@ -320,8 +320,9 @@ def main():
         {"Dataset": "HAI (Zero-shot)", **metrics_hai}
     ])
     
-    # Calculate Transfer Gap
-    transfer_gap = metrics_swat_pooled["F1"] - metrics_hai["F1"]
+    # Calculate Transfer Gap (Best-case SWaT - HAI)
+    best_swat_f1 = max(metrics_a["F1"], metrics_b["F1"])
+    transfer_gap = best_swat_f1 - metrics_hai["F1"]
     metrics_df["Delta-F1 Transfer Gap"] = transfer_gap
     
     metrics_df.to_csv(tables_dir / "metrics.csv", index=False)
